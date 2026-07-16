@@ -148,6 +148,16 @@
       </div>
     </div>
     <div class="field">
+      <label>침묵 자동 전송</label>
+      <select id="autosend">
+        <option value="0">끄기 — 🎤 버튼을 다시 눌러 전송</option>
+        <option value="3">3초 침묵 시 자동 전송</option>
+        <option value="5">5초 침묵 시 자동 전송 (권장)</option>
+        <option value="8">8초 침묵 시 자동 전송</option>
+      </select>
+      <div class="hint">말을 마치고 이 시간 동안 조용하면 자동 전송됩니다. 문장 중간에 멈춰 생각해도 이 시간 안이면 끊기지 않아요.</div>
+    </div>
+    <div class="field">
       <label>AI 목소리(억양)</label>
       <select id="voiceSel"></select>
       <div class="hint">브라우저 내장 TTS를 사용합니다(무료).</div>
@@ -174,6 +184,7 @@ const LS = {
   get mode(){return localStorage.getItem('sc_mode')||'direct'}, set mode(v){localStorage.setItem('sc_mode',v)},
   get proxy(){return localStorage.getItem('sc_proxy')||''}, set proxy(v){localStorage.setItem('sc_proxy',v)},
   get ptoken(){return localStorage.getItem('sc_ptoken')||''}, set ptoken(v){localStorage.setItem('sc_ptoken',v)},
+  get autosend(){return localStorage.getItem('sc_autosend')||'5'}, set autosend(v){localStorage.setItem('sc_autosend',v)},
 };
 // 현재 연결 방식 기준으로 사용 가능 여부
 function configured(){ return LS.mode==='proxy' ? !!LS.proxy : !!LS.k; }
@@ -225,6 +236,7 @@ function openSettings(){
   $('#apiKey').value=LS.k; $('#model').value=LS.model; $('#level').value=LS.level;
   $('#persona').value=LS.persona; $('#mode').value=LS.mode;
   $('#proxyUrl').value=LS.proxy; $('#proxyToken').value=LS.ptoken;
+  $('#autosend').value=LS.autosend;
   updateModeUI(); populateVoices(); overlay.classList.add('show');
 }
 $('#mode').onchange=updateModeUI;
@@ -247,6 +259,7 @@ $('#saveBtn').onclick=()=>{
   }
   LS.mode=mode; LS.model=$('#model').value; LS.level=$('#level').value;
   LS.persona=$('#persona').value.trim(); LS.voice=$('#voiceSel').value;
+  LS.autosend=$('#autosend').value;
   updateBadge();
   $('#cfgErr').textContent=''; overlay.classList.remove('show');
   if(history.length===0){ emptyState.style.display='none'; greet(); }
@@ -284,37 +297,60 @@ $('#voiceBtn').onclick=()=>{
   if(recognition) recognition.lang=LS.accent;
 };
 
-/* ---------- 음성 인식(STT) ---------- */
-let recognition=null, lastConfidence=null;
+/* ---------- 음성 인식(STT) ----------
+   학습자는 문장 중간에 생각하느라 멈추는 게 정상이므로:
+   ① continuous 모드로 침묵에도 인식 유지
+   ② 브라우저가 임의로 끊으면 텍스트 보존한 채 자동 재시작
+   ③ 전송은 버튼 재클릭 또는 설정된 침묵 시간(기본 5초) 경과 시 */
+let recognition=null, lastConfidence=null, sttFinal='', manualStop=false, silenceTimer=null;
+function armSilenceTimer(){
+  clearTimeout(silenceTimer);
+  const s=parseInt(LS.autosend,10)||0;
+  if(s>0 && sttFinal.trim()){
+    silenceTimer=setTimeout(()=>{ manualStop=true; try{recognition.stop();}catch(_){} }, s*1000);
+  }
+}
 function initSTT(){
   const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
   if(!SR){ micBtn.disabled=true; micLabel.textContent='음성인식 미지원'; return; }
   recognition=new SR();
-  recognition.lang=LS.accent; recognition.interimResults=true; recognition.maxAlternatives=1;
-  let finalText='';
-  recognition.onstart=()=>{ recognizing=true; finalText=''; lastConfidence=null;
-    micBtn.classList.add('rec'); micLabel.textContent='듣는 중… (다시 눌러 종료)'; live.classList.add('on'); live.textContent='🎧 듣고 있어요…'; };
+  recognition.lang=LS.accent; recognition.interimResults=true; recognition.continuous=true; recognition.maxAlternatives=1;
   recognition.onresult=e=>{
     let interim='';
     for(let i=e.resultIndex;i<e.results.length;i++){
       const r=e.results[i];
-      if(r.isFinal){ finalText+=r[0].transcript+' '; if(r[0].confidence) lastConfidence=r[0].confidence; }
+      if(r.isFinal){ sttFinal+=r[0].transcript+' '; if(r[0].confidence) lastConfidence=r[0].confidence; }
       else interim+=r[0].transcript;
     }
-    live.textContent='📝 '+(finalText+interim);
+    live.textContent='📝 '+(sttFinal+interim);
+    armSilenceTimer();
   };
-  recognition.onerror=e=>{ live.textContent='⚠️ 인식 오류: '+e.error; };
-  recognition.onend=()=>{ recognizing=false; micBtn.classList.remove('rec'); micLabel.textContent='말하기'; live.classList.remove('on');
-    const t=finalText.trim(); live.textContent='';
+  recognition.onerror=e=>{
+    if(e.error==='not-allowed'||e.error==='service-not-allowed'){ manualStop=true; live.textContent='⚠️ 마이크 권한이 필요합니다'; }
+    else if(e.error!=='no-speech'){ live.textContent='⚠️ 인식 오류: '+e.error; }
+  };
+  recognition.onend=()=>{
+    if(!manualStop && recognizing){
+      try{ recognition.start(); return; }catch(_){} // 임의 종료 → 이어서 듣기
+    }
+    clearTimeout(silenceTimer);
+    recognizing=false; micBtn.classList.remove('rec'); micLabel.textContent='말하기'; live.classList.remove('on');
+    const t=sttFinal.trim(); sttFinal=''; live.textContent='';
     if(t) submitUtterance(t, lastConfidence);
   };
+}
+function startListening(){
+  sttFinal=''; lastConfidence=null; manualStop=false; recognizing=true;
+  micBtn.classList.add('rec'); micLabel.textContent='듣는 중 — 누르면 전송';
+  live.classList.add('on'); live.textContent='🎧 편하게 말하세요. 중간에 멈춰도 계속 듣습니다.';
+  try{ recognition.lang=LS.accent; recognition.start(); }catch(_){}
 }
 micBtn.onclick=()=>{
   if(!recognition){ alert('이 브라우저는 음성 인식을 지원하지 않습니다. Chrome을 권장합니다. 하단 입력창으로 대신 연습할 수 있어요.'); return; }
   if(!configured()){ openSettings(); return; }
-  if(recognizing){ recognition.stop(); return; }
+  if(recognizing){ manualStop=true; try{recognition.stop();}catch(_){} return; }
   speechSynthesis.cancel();
-  try{ recognition.lang=LS.accent; recognition.start(); }catch(_){}
+  startListening();
 };
 sendBtn.onclick=()=>{ const t=textIn.value.trim(); if(!t||busy) return; textIn.value=''; submitUtterance(t,null); };
 textIn.addEventListener('keydown',e=>{ if(e.key==='Enter') sendBtn.click(); });
