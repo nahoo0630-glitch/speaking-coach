@@ -67,6 +67,7 @@
   .field textarea{resize:vertical;min-height:56px}
   .field .hint{font-size:11.5px;color:var(--dim);margin-top:5px}
   .field .hint a{color:var(--accent)}
+  .sect{font-size:12px;font-weight:700;color:var(--accent);margin:4px 0 10px;border-top:1px solid var(--line);padding-top:12px}
   .row{display:flex;gap:10px}
   .row>*{flex:1}
   .primary{background:var(--accent);color:#fff;padding:11px;font-weight:700;width:100%}
@@ -147,15 +148,42 @@
         </select>
       </div>
     </div>
+    <div class="sect">🎙 음성 입력</div>
     <div class="field">
-      <label>침묵 자동 전송</label>
-      <select id="autosend">
-        <option value="0">끄기 — 🎤 버튼을 다시 눌러 전송</option>
-        <option value="3">3초 침묵 시 자동 전송</option>
-        <option value="5">5초 침묵 시 자동 전송 (권장)</option>
-        <option value="8">8초 침묵 시 자동 전송</option>
+      <label>입력 방식</label>
+      <select id="sttmode">
+        <option value="auto">자동 (권장) — PC는 앱 마이크, 폰은 키보드 음성입력</option>
+        <option value="app">앱 마이크 — 하단 🎤 버튼으로 말하기</option>
+        <option value="keyboard">키보드 음성입력 — 키보드의 🎤로 말하기 (폰 권장)</option>
       </select>
-      <div class="hint">말을 마치고 이 시간 동안 조용하면 자동 전송됩니다. 문장 중간에 멈춰 생각해도 이 시간 안이면 끊기지 않아요.</div>
+      <div class="hint">키보드 방식: 폰에서 익숙한 음성 키보드(Gboard 등)를 그대로 사용합니다.</div>
+    </div>
+    <div class="field">
+      <label>자동 전송</label>
+      <select id="autosend">
+        <option value="0">끄기 — 전송 버튼을 직접 누르기</option>
+        <option value="3">말을 멈추고 3초 후</option>
+        <option value="5">말을 멈추고 5초 후 (권장)</option>
+        <option value="8">말을 멈추고 8초 후</option>
+      </select>
+      <div class="hint">문장 중간에 생각하느라 멈춰도 이 시간 안이면 끊기지 않습니다.</div>
+    </div>
+    <div class="field">
+      <label>응답 후 키보드 자동 열기</label>
+      <select id="kbfocus">
+        <option value="1">켜기 — AI 응답이 끝나면 바로 말할 준비 (권장)</option>
+        <option value="0">끄기 — 원할 때 입력창을 직접 탭</option>
+      </select>
+      <div class="hint">키보드 음성입력 방식에서만 적용됩니다.</div>
+    </div>
+    <div class="sect">🔊 음성 출력</div>
+    <div class="field">
+      <label>AI 음성 응답</label>
+      <select id="tts">
+        <option value="1">켜기 — AI가 소리 내어 대답 (듣기 연습 겸용)</option>
+        <option value="0">끄기 (자막 모드) — 말풍선의 🔊 듣기로만 재생</option>
+      </select>
+      <div class="hint">자막 모드에서는 키보드 🎤를 계속 켜둔 채 연속으로 대화할 수 있어요.</div>
     </div>
     <div class="field">
       <label>AI 목소리(억양)</label>
@@ -185,6 +213,9 @@ const LS = {
   get proxy(){return localStorage.getItem('sc_proxy')||''}, set proxy(v){localStorage.setItem('sc_proxy',v)},
   get ptoken(){return localStorage.getItem('sc_ptoken')||''}, set ptoken(v){localStorage.setItem('sc_ptoken',v)},
   get autosend(){return localStorage.getItem('sc_autosend')||'5'}, set autosend(v){localStorage.setItem('sc_autosend',v)},
+  get sttmode(){return localStorage.getItem('sc_sttmode')||'auto'}, set sttmode(v){localStorage.setItem('sc_sttmode',v)},
+  get kbfocus(){return localStorage.getItem('sc_kbfocus')||'1'}, set kbfocus(v){localStorage.setItem('sc_kbfocus',v)},
+  get tts(){return localStorage.getItem('sc_tts')||'1'}, set tts(v){localStorage.setItem('sc_tts',v)},
 };
 // 현재 연결 방식 기준으로 사용 가능 여부
 function configured(){ return LS.mode==='proxy' ? !!LS.proxy : !!LS.k; }
@@ -236,7 +267,8 @@ function openSettings(){
   $('#apiKey').value=LS.k; $('#model').value=LS.model; $('#level').value=LS.level;
   $('#persona').value=LS.persona; $('#mode').value=LS.mode;
   $('#proxyUrl').value=LS.proxy; $('#proxyToken').value=LS.ptoken;
-  $('#autosend').value=LS.autosend;
+  $('#autosend').value=LS.autosend; $('#sttmode').value=LS.sttmode;
+  $('#kbfocus').value=LS.kbfocus; $('#tts').value=LS.tts;
   updateModeUI(); populateVoices(); overlay.classList.add('show');
 }
 $('#mode').onchange=updateModeUI;
@@ -260,7 +292,8 @@ $('#saveBtn').onclick=()=>{
   LS.mode=mode; LS.model=$('#model').value; LS.level=$('#level').value;
   LS.persona=$('#persona').value.trim(); LS.voice=$('#voiceSel').value;
   LS.autosend=$('#autosend').value;
-  updateBadge();
+  LS.sttmode=$('#sttmode').value; LS.kbfocus=$('#kbfocus').value; LS.tts=$('#tts').value;
+  updateBadge(); updateMicUI();
   $('#cfgErr').textContent=''; overlay.classList.remove('show');
   if(history.length===0){ emptyState.style.display='none'; greet(); }
 };
@@ -281,15 +314,23 @@ function populateVoices(){
   if(!voices.length){ const o=document.createElement('option'); o.textContent='(브라우저 음성 없음)'; sel.appendChild(o); }
 }
 if('speechSynthesis' in window) speechSynthesis.onvoiceschanged=()=>{ loadVoices(); if(overlay.classList.contains('show')) populateVoices(); };
-function speak(text){
-  if(!('speechSynthesis' in window)) return;
+// force=true면 자막 모드에서도 재생(말풍선 🔊 듣기 버튼용). onDone은 재생 종료(또는 스킵) 시 호출
+function speak(text, onDone, force){
+  const done=()=>{ if(onDone) onDone(); };
+  if(!force && LS.tts!=='1'){ done(); return; }           // 자막 모드
+  if(!('speechSynthesis' in window)){ done(); return; }
   // Chrome은 첫 사용자 상호작용 전 자동재생을 차단 — 조용한 실패 대신 스킵(🔊 듣기로 재생 가능)
-  if(navigator.userActivation && !navigator.userActivation.hasBeenActive) return;
+  if(navigator.userActivation && !navigator.userActivation.hasBeenActive){ done(); return; }
   speechSynthesis.cancel();
   const u=new SpeechSynthesisUtterance(text);
   const v=voices.find(v=>v.name===LS.voice)||voices.find(v=>v.lang===LS.accent)||voices[0];
   if(v){ u.voice=v; u.lang=v.lang; } else u.lang=LS.accent;
-  u.rate=0.95; speechSynthesis.speak(u);
+  u.rate=0.95; u.onend=done; u.onerror=done;
+  speechSynthesis.speak(u);
+}
+// AI 응답 처리 후: 키보드 모드 + 자동 열기 켬이면 입력창 포커스(키보드 대기 상태 유지)
+function afterReply(){
+  if(effSttMode()==='keyboard' && LS.kbfocus==='1' && !overlay.classList.contains('show')) textIn.focus();
 }
 $('#voiceBtn').onclick=()=>{
   LS.accent = LS.accent==='en-US' ? 'en-GB' : 'en-US';
@@ -357,14 +398,41 @@ function startListening(){
   live.classList.add('on'); live.textContent='🎧 편하게 말하세요. 중간에 멈춰도 계속 듣습니다.';
   try{ recognition.lang=LS.accent; recognition.start(); }catch(_){}
 }
+// 실제 적용되는 입력 방식 ('auto'는 기기 감지로 해석)
+function effSttMode(){ const m=LS.sttmode; return m==='auto' ? (IS_ANDROID?'keyboard':'app') : m; }
+function updateMicUI(){
+  if(effSttMode()==='keyboard'){
+    micBtn.disabled=false; micLabel.textContent='⌨️ 말하기 — 키보드 🎤 사용';
+  }else{
+    micBtn.disabled=!recognition;
+    micLabel.textContent=recognition?'말하기':'음성인식 미지원';
+  }
+}
 micBtn.onclick=()=>{
-  if(!recognition){ alert('이 브라우저는 음성 인식을 지원하지 않습니다. Chrome을 권장합니다. 하단 입력창으로 대신 연습할 수 있어요.'); return; }
   if(!configured()){ openSettings(); return; }
+  if(effSttMode()==='keyboard'){ speechSynthesis.cancel(); textIn.focus(); return; }
+  if(!recognition){ alert('이 브라우저는 음성 인식을 지원하지 않습니다. Chrome을 권장합니다. 하단 입력창으로 대신 연습할 수 있어요.'); return; }
   if(recognizing){ manualStop=true; try{recognition.stop();}catch(_){} return; }
   speechSynthesis.cancel();
   startListening();
 };
-sendBtn.onclick=()=>{ const t=textIn.value.trim(); if(!t||busy) return; textIn.value=''; submitUtterance(t,null); };
+// 키보드 음성입력 모드: 글자 유입이 멈추고 자동 전송 시간이 지나면 전송
+let kbTimer=null;
+function sendFromInput(){
+  clearTimeout(kbTimer);
+  const t=textIn.value.trim(); if(!t||busy) return;
+  textIn.value='';
+  // AI 음성이 켜진 경우에만 키보드 음성입력을 잠시 종료(에코 방지). 자막 모드는 연속 받아쓰기 유지
+  if(effSttMode()==='keyboard' && LS.tts==='1') textIn.blur();
+  submitUtterance(t,null);
+}
+textIn.addEventListener('input',()=>{
+  clearTimeout(kbTimer);
+  if(effSttMode()!=='keyboard') return;
+  const s=parseInt(LS.autosend,10)||0;
+  if(s>0 && textIn.value.trim() && !busy) kbTimer=setTimeout(sendFromInput, s*1000);
+});
+sendBtn.onclick=sendFromInput;
 textIn.addEventListener('keydown',e=>{ if(e.key==='Enter') sendBtn.click(); });
 
 /* ---------- 대화 렌더 ---------- */
@@ -381,7 +449,7 @@ function addTurn(t){
   const meta=document.createElement('div'); meta.className='meta';
   if(t.role==='model'){
     const play=document.createElement('button'); play.className='play'; play.textContent='🔊 듣기';
-    play.onclick=()=>speak(t.text); meta.appendChild(play);
+    play.onclick=()=>speak(t.text,null,true); meta.appendChild(play);
   }
   if(t.role==='user' && t.score!=null){
     const sc=document.createElement('span'); sc.className='score';
@@ -503,7 +571,7 @@ async function submitUtterance(text, confidence){
     if(r.correction_html){ userTurn.correction=r.correction_html; refreshLastUser(); }
     const aiTurn={role:'model',text:r.reply||'',ko:r.reply_ko||'',tip:r.tip||''};
     history.push(aiTurn); addTurn(aiTurn);
-    speak(aiTurn.text);
+    speak(aiTurn.text, afterReply);
   }catch(e){
     thinking.remove();
     addTurn({role:'model',text:'⚠️ 오류: '+e.message+'\n(설정에서 API 키/모델을 확인하세요.)'});
@@ -531,7 +599,7 @@ async function greet(){
     history.pop(); // remove the synthetic priming turn from real history
     thinking.remove();
     const aiTurn={role:'model',text:r.reply||'Hi! Ready to practice?',ko:r.reply_ko||'',tip:r.tip||''};
-    history.push(aiTurn); addTurn(aiTurn); speak(aiTurn.text);
+    history.push(aiTurn); addTurn(aiTurn); speak(aiTurn.text, afterReply);
   }catch(e){ history.pop(); thinking.remove(); addTurn({role:'model',text:'⚠️ '+e.message}); }
   finally{ busy=false; }
 }
@@ -539,7 +607,7 @@ async function greet(){
 /* ---------- 초기화 ---------- */
 (function init(){
   renderScenarios(); initSTT();
-  updateBadge();
+  updateBadge(); updateMicUI();
   $('#voiceBtn').textContent=LS.accent==='en-US'?'🔊 US':'🔊 UK';
   if('speechSynthesis' in window){ loadVoices(); setTimeout(loadVoices,300); }
   if(!configured()){ setTimeout(openSettings,400); }
